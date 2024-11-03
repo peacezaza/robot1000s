@@ -1,89 +1,99 @@
-# import paho.mqtt.client as mqtt
-# import paho.mqtt
-# print(paho.mqtt.__version__)
-#
-# # The callback for when the client receives a CONNACK response from the server.
-# def on_connect(client, userdata, flags, rc, properties=None):  # 'properties' for version 5
-#     print(f"Connected with result code {rc}")
-#     client.subscribe("/ESP32/ultraSonicFront")
-#
-# # The callback for when a PUBLISH message is received from the server.
-# def on_message(client, userdata, msg):
-#     topic = msg.topic
-#     message = msg.payload.decode("utf-8")
-#     print(f"{topic}: {message}")
-#
-# # Create a new MQTT client instance, specifying MQTT version 5
-# client = mqtt.Client(protocol=mqtt.MQTTv5)
-#
-# # Assign the callbacks
-# client.on_connect = on_connect
-# client.on_message = on_message
-#
-# # Connect to the MQTT broker
-# client.connect("20.2.250.248", 1883, 60)
-#
-# # Start the network loop (non-blocking)
-# client.loop_start()
-#
-# # Example of publishing a message
-# your_data = "data"
-# client.publish("/ESP32/ultraSonic", your_data)
-#
-# # Keep the script running (since loop_start() is non-blocking)
-# import time
-# while True:
-#     time.sleep(1)
-import math
+import pygame
+import websocket
+import json
 
-import paho.mqtt.client as mqtt
-import matplotlib.pyplot as plt
-import time
+# Initialize Pygame
+pygame.init()
+screen = pygame.display.set_mode((800, 800))
+pygame.display.set_caption("Robot Mapping")
 
+# Initial position
+x, y = 400, 400
+current_direction = "East"  # Start with initial direction as East
 
-x_data, y_data = [], []
-x, y = 0, 0
-
-current_direction = "North"
-
-direction_map = {
-    "North": 0,
-    "East": 90,
-    "South": 180,
-    "West": 270
+# Direction vectors
+directions = {
+    "North": (0, -1),
+    "South": (0, 1),
+    "East": (1, 0),
+    "West": (-1, 0)
 }
 
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 
-def update_position(distance, direction):
+
+# Draw a line based on the direction and distance (time)
+def draw_line(direction, time):
     global x, y
-    angle = direction_map[direction] * (3.14159 / 180)
-    x += distance * math.cos(angle)
-    y += distance * math.sin(angle)
-    return x, y
+
+    # Calculate movement vector
+    dx, dy = directions[direction]
+    new_x = x + dx * time * 10  # Scale factor to increase line length
+    new_y = y + dy * time * 10
+
+    # Draw line from (x, y) to (new_x, new_y)
+    pygame.draw.line(screen, BLACK, (x, y), (new_x, new_y), 2)
+    pygame.display.flip()
+
+    # Update position
+    x, y = new_x, new_y
 
 
-
-def on_connect(client, userdata, flags, rc, properties=None):
-    print(f"Connected with result code {rc}")
-    client.subscribe("/ESP32/ultraSonicFront")
-    client.subscribe("/ESP32/ultraSonicRight")
-    client.subscribe("/ESP32/direction")
-
-def on_message(client, userdata, msg):
+# WebSocket event handlers
+def on_message(ws, message):
     global current_direction
-    message = msg.payload.decode("utf-8")
-    print(f"{msg.topic}: {message}")
+    data = json.loads(message)
+
+    # Update direction and draw the line
+    direction = data["direction"]
+    time = data["time"]
+
+    # Draw the line on the map
+    draw_line(direction, time)
+    current_direction = direction
+    print("Received: ", message)
 
 
+def on_error(ws, error):
+    print("Error:", error)
 
-# Set up MQTT client
-client = mqtt.Client(protocol=mqtt.MQTTv5)
-client.on_connect = on_connect
-client.on_message = on_message
-client.connect("20.2.250.248", 1883, 60)
-client.loop_start()
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Plotting stopped.")
+
+def on_close(ws, close_status_code, close_msg):
+    print("Connection closed")
+
+
+def on_open(ws):
+    print("Connected to server")
+
+
+# Set up the WebSocket
+ws_url = "ws://20.2.250.248:1880/ws/data"
+ws = websocket.WebSocketApp(
+    ws_url,
+    on_open=on_open,
+    on_message=on_message,
+    on_error=on_error,
+    on_close=on_close
+)
+
+# Run the WebSocket in a thread
+import threading
+
+ws_thread = threading.Thread(target=ws.run_forever)
+ws_thread.daemon = True
+ws_thread.start()
+
+# Main Pygame loop
+running = True
+screen.fill(WHITE)
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+
+    # Update display
+    pygame.display.flip()
+
+pygame.quit()
